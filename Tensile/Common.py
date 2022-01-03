@@ -341,6 +341,17 @@ validGEMMTypes = [ ('D','D','D'), ('S','S','S'), ('Z','Z','Z'), ('C','C','C'), \
 # For the rest of the typed, we keep them with old existing naming.
 typesUsingNewNaming = [ ('H','H','S'), ('H','S','S'), ('B','S','S'),('I8','I','I')]
 
+validGRPinstructions = []
+validNumWaveInC = list(range(1, 16+1))
+validNumLoadsCoalesced = list(range(-1, 64+1))
+validAlg = list(range(0, 4))
+for waveInC in validNumWaveInC:
+  for nlc in validNumLoadsCoalesced:
+    for alg in validAlg:
+      validGRPinstructions.append([waveInC, nlc, alg])
+validGRPinstructions.append([])
+
+
 validParameters = {
     "LoopDoWhile":                [ False, True ], # Source. True=DoWhile, False=For loop
     "LoopTail":                   [ False, True ], # tail loop handles non multiples of unrolled summation loop
@@ -373,6 +384,13 @@ validParameters = {
     # -1 is selected by logic, 0 disable, 1 enable.
     "WaveSeparateGlobalReadA":    [ 0, 1 ],
     "WaveSeparateGlobalReadB":    [ 0, 1 ],
+
+    # 
+    #
+    #
+    "GlobalReadPatternA": validGRPinstructions,
+    "GlobalReadPatternB": validGRPinstructions,
+
 
     # PrefetchGlobalRead = 1:
     # Requires 2X LDS space, and VGPRs for buffering data on way into LDS
@@ -1214,6 +1232,8 @@ defaultBenchmarkCommonParameters = [
     {"GlobalReadCoalesceVectorB": [ True ] },
     {"WaveSeparateGlobalReadA":    [ 0 ] },
     {"WaveSeparateGlobalReadB":    [ 0 ] },
+    {"GlobalReadPatternA":         [ [] ]},
+    {"GlobalReadPatternB":         [ [] ]},
     {"GlobalReadCoalesceGroupA":  [ True ] },
     {"GlobalReadCoalesceGroupB":  [ True ] },
     {"PrefetchGlobalRead":        [ 1 ] },

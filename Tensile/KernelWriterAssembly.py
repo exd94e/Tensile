@@ -3881,6 +3881,8 @@ class KernelWriterAssembly(KernelWriter):
         divisorName = tP["lsp"]
       else:
         divisorName = tP["lvp"]
+    if kernel["GlobalReadPattern%s"%tc]!=[]:
+      divisorName = "GRP_divisor%s"%tc
     divisor = kernel[divisorName]
 
     if tP["grcg"] == tP["tlu"]:
@@ -3923,6 +3925,12 @@ class KernelWriterAssembly(KernelWriter):
       dividendReg = self.vgprPool.checkOut(1, "idInWave", self.preventVgprOverflowDuringNewTile)
       dummy       = self.vgprPool.checkOut(1, "dummy", self.preventVgprOverflowDuringNewTile)
       kStr += vectorStaticRemainder(dummy, dividendReg, "Serial", self.kernel["WavefrontSize"], tmpVgpr, tmpSgpr)
+
+    if kernel["GlobalReadPattern%s"%tc]!=[]:
+      dividendReg = self.vgprPool.checkOut(1, "idInWave", self.preventVgprOverflowDuringNewTile)
+      dummy       = self.vgprPool.checkOut(1, "dummy", self.preventVgprOverflowDuringNewTile)
+      kStr += vectorStaticRemainder(dummy, dividendReg, "Serial", self.kernel["WavefrontSize"], tmpVgpr, tmpSgpr)
+
 
     if kernel["DirectToVgpr%s"%tc]:
       # offset calculation for DirectToVgpr
@@ -3976,6 +3984,63 @@ class KernelWriterAssembly(KernelWriter):
       else:
         kStr += self.comment1("gro-unroll *= glvw")
         kStr += staticMultiply(vgpr(uReg), vgpr(uReg), tP["glvw"], sgpr(tmpSgpr))
+
+
+    if kernel["GlobalReadPattern%s"%tc]!=[]:
+      waveInC = kernel["GlobalReadPattern%s"%tc][0]
+      waveInP = kernel["GlobalReadPattern%s"%tc][1]
+      WSGR_P = kernel["GlobalReadPattern%s"%tc][3]
+      if (tP["tlu"]):
+        Dividend_C = kernel[tP["mt"]]
+        Dividend_P = kernel["DepthU"]
+        cReg = tReg
+        pReg = uReg
+      else:
+        Dividend_C = kernel["DepthU"]
+        Dividend_P = kernel[tP["mt"]]
+        cReg = uReg
+        pReg = tReg
+      waveIDSgpr = self.sgprPool.checkOutAligned(1, 1, "waveID", False)
+      tempSgpr = self.sgprPool.checkOutAligned(1, 1, "tempSgpr", False)
+      divModSgpr = self.sgprPool.checkOutAligned(3, 1, "divModSgpr", False) # for / and % operation
+
+      # WaveID
+      kStr += inst("v_readfirstlane_b32", sgpr(waveIDSgpr), vgpr("Serial"), "%s = WaveIdxWavefrontWidth"%sgpr(waveIDSgpr))
+      kStr += inst("s_lshr_b32", sgpr(waveIDSgpr), sgpr(waveIDSgpr), hex(log2(self.kernel["WavefrontSize"])), "%s = %s / %u = WaveID"%(sgpr(waveIDSgpr), sgpr(waveIDSgpr), self.kernel["WavefrontSize"])) # WaveID
+
+      # v0
+      kStr += self.comment1("CID = WaveID / waveInP")
+      kStr += scalarStaticDivideAndRemainder(tempSgpr, tempSgpr, waveIDSgpr, waveInP, divModSgpr, 0) # CID = WaveID / waveInP
+      kStr += inst("s_mul_i32", sgpr(tempSgpr), sgpr(tempSgpr), Dividend_C // waveInC, "%s = %s * MT(DU)/waveInC"%(sgpr(tempSgpr), sgpr(tempSgpr)))  # temp = CID * (MT(DU)/waveInC)
+      kStr += inst("_v_add_u32", vgpr(cReg), vgpr(cReg), sgpr(tempSgpr), "%s += %s"%(vgpr(cReg), sgpr(tempSgpr))) # v0 += temp
+
+      # v1
+      kStr += self.comment1("PID = WaveID % waveInP")
+      kStr += scalarStaticDivideAndRemainder(tempSgpr, tempSgpr, waveIDSgpr, waveInP, divModSgpr, 2) # PID = WaveID % waveInP
+      if WSGR_P == 0:
+        kStr += inst("s_mul_i32", sgpr(tempSgpr), sgpr(tempSgpr), kernel[tP["lsp"]] // waveInP, "%s = %s * LSPA/waveInP"%(sgpr(tempSgpr), sgpr(tempSgpr)))  # temp = PID * (LSPA/waveInP)
+        kStr += inst("_v_add_u32", vgpr(pReg), vgpr(pReg), sgpr(tempSgpr), "%s += %s"%(vgpr(pReg), sgpr(tempSgpr))) # v1 += temp
+      elif WSGR_P == 1:
+        kStr += inst("s_mul_i32", sgpr(tempSgpr), sgpr(tempSgpr), Dividend_P // waveInP, "%s = %s * DepthU(MT)/waveInP"%(sgpr(tempSgpr), sgpr(tempSgpr)))  # temp = PID * (DepthU(MT)/waveInP)
+        kStr += inst("_v_add_u32", vgpr(pReg), vgpr(pReg), sgpr(tempSgpr), "%s += %s"%(vgpr(pReg), sgpr(tempSgpr))) # v1 += temp
+      elif WSGR_P == 2:
+        kStr += staticMultiply(vgpr(pReg), vgpr(pReg), waveInP, sgpr(divModSgpr), "%s = %s * waveInP"%(vgpr(pReg), vgpr(pReg))) # v1 *= waveInP
+        kStr += inst("_v_add_u32", vgpr(pReg), vgpr(pReg), sgpr(tempSgpr), "%s += %s"%(vgpr(pReg), sgpr(tempSgpr))) # v1 += PID
+      elif WSGR_P == 3:
+        kStr += staticMultiply(vgpr(pReg), vgpr(pReg), tP["nrp"], sgpr(divModSgpr), "%s = %s * NLP"%(vgpr(pReg), vgpr(pReg))) # v1 *= NLP
+        kStr += inst("s_mul_i32", sgpr(tempSgpr), sgpr(tempSgpr), Dividend_P // waveInP, "%s = %s * DepthU(MT)/waveInP"%(sgpr(tempSgpr), sgpr(tempSgpr)))  # temp = PID * (DepthU(MT)/waveInP)
+        kStr += inst("_v_add_u32", vgpr(pReg), vgpr(pReg), sgpr(tempSgpr), "%s += %s"%(vgpr(pReg), sgpr(tempSgpr))) # v1 += temp
+      else:
+        pass # assert (WSGR_P <=3)
+
+      self.sgprPool.checkIn(waveIDSgpr)
+      self.sgprPool.checkIn(tempSgpr)
+      self.sgprPool.checkIn(divModSgpr)
+      self.vgprPool.checkIn(dividendReg)
+      self.vgprPool.checkIn(dummy)
+
+
+
 
     if not self.groOffsetInMacroTile:
       # Buffer Load will set the SRD to start of the MacroTile
@@ -5142,7 +5207,7 @@ class KernelWriterAssembly(KernelWriter):
     assert (validBytesPerLoad <= maxBytesPerLoad)
     assert (kernel[tP["lsc"]] * kernel[tP["lsp"]] % tP["glvw"] == 0)
 
-    if validBytesPerLoad != maxBytesPerLoad:
+    if validBytesPerLoad != maxBytesPerLoad and kernel["GlobalReadPattern%s"%tc]==[]:
       tmpSgpr = self.getTmpSgpr(1).idx()
       kStr += inst("s_mov_b32", sgpr(tmpSgpr), validWIPerLoad, \
           "lsc*lsp=%u*%u"%(kernel[tP["lsc"]],kernel[tP["lsp"]] ))

@@ -2009,6 +2009,10 @@ class Solution(collections.abc.Mapping):
     if state["WaveSeparateGlobalRead%s"%tc]:
       totalElementsPerp = roundupRatio(totalElementsPerp, state["NumThreads"] // state["WavefrontSize"])
 
+    if state["GlobalReadPattern%s"%tc]!=[]:
+      state["NumLoadsCoalesced%s"%tc] = state["GlobalReadPattern%s"%tc][2]
+
+
     # nlc = 1
     if state["NumLoadsCoalesced%s"%tc] == 1 :
       foundValid = False
@@ -2084,6 +2088,43 @@ class Solution(collections.abc.Mapping):
     if state["DirectToVgpr%c"%tc] and state["NumLoadsCoalesced%c"%tc] > 1:
       reject(state, "DirectToVgpr%c does not supports NumLoadsCoalesced%c > 1"%(tc, tc))
       return False
+
+    if state["GlobalReadPattern%s"%tc]!=[]:
+      waveInC = state["GlobalReadPattern%s"%tc][0]
+      waveInP = state["GlobalReadPattern%s"%tc][1]
+      WSGR_P = state["GlobalReadPattern%s"%tc][3]
+
+      if state["ProblemType"]["TLU%s"%tc]: # NT
+        Dividend_C = state["MacroTile%s"%tc]
+        Dividend_P = state["DepthU"]
+      else:
+        Dividend_C = state["DepthU"]
+        Dividend_P = state["MacroTile%s"%tc]
+
+      if WSGR_P == 0 or WSGR_P == 2:
+        state["LSP%s"%tc] = Dividend_P // state["NumLoadsPerpendicular%s"%tc]
+      elif WSGR_P == 1:
+        if state["NumLoadsPerpendicular%s"%tc] > 1:
+          state["LSP%s"%tc] = Dividend_P // state["NumLoadsPerpendicular%s"%tc] // waveInP
+        else:
+          state["LSP%s"%tc] = Dividend_P // state["NumLoadsPerpendicular%s"%tc]
+      elif WSGR_P == 3:
+        state["LSP%s"%tc] = 1
+      else:
+        pass
+        # assert(WSGR_P <= 3)
+
+      if WSGR_P == 0 or WSGR_P == 1 or WSGR_P == 2 or WSGR_P == 3:
+        if state["NumLoadsCoalesced%s"%tc] > 1:
+          state["LSC%s"%tc] = Dividend_C // state["NumLoadsCoalesced%s"%tc] // waveInC
+        else:
+          state["LSC%s"%tc] = Dividend_C // state["NumLoadsCoalesced%s"%tc]
+      else:
+        pass
+        # assert(WSGR_P <= 3)
+
+
+
 
     return True
 
@@ -2342,6 +2383,92 @@ class Solution(collections.abc.Mapping):
         reject(state, "dind't support WaveSeparateGlobalRead when DepthU is not multiple of wave %u in TLU%s" % (state["DepthU"], tc))
       if not state["ProblemType"]["TLU%s"%tc] and (state["MacroTile%s" % tc] % numOfWaves != 0):
         reject(state, "dind't support WaveSeparateGlobalRead when MacroTile is not multiple of wave %u in TLU%s" % (state["MacroTile%s"%tc], tc))
+
+
+
+  ##############################################
+  # calculate Global Read Pattern
+  @staticmethod
+  def assignGlobalReadPattern(state, tc):
+    # state["GlobalReadPatternA"] = [x, waveInP, x, x]
+
+    # assert(NumThreads % WavefrontSize == 0)
+    if state["NumThreads"] % state["WavefrontSize"] != 0:
+      reject(state, "can't use GlobalReadPattern for NumThreads % WavefrontSize != 0")
+    numOfWaves = state["NumThreads"] // state["WavefrontSize"]
+    waveInC = state["GlobalReadPattern%s"%tc][0]
+
+    # assert(numOfWaves % waveInC == 0)
+    if numOfWaves % waveInC != 0:
+       reject(state, "Didn't support NumWaveInc = %u in GlobalReadPattern with total waves = %u" % (waveInC, numOfWaves))
+    waveInP = numOfWaves // waveInC
+    state["GlobalReadPattern%s"%tc].insert(1, waveInP)
+
+    # assert(NumLoadsCoalesced == 1)
+    if state["NumLoadsCoalesced%c"%tc] != 1:
+      reject(state, "GlobalReadPattern%c does not supports NumLoadsCoalesced%c != 1 (default value)"%(tc, tc))
+
+
+
+
+  ##############################################
+  # check Global Read Pattern
+  @staticmethod
+  def checkGlobalReadPattern(state, tc):
+    waveInC = state["GlobalReadPattern%s"%tc][0]
+    waveInP = state["GlobalReadPattern%s"%tc][1]
+    if state["ProblemType"]["TLU%s"%tc]: # NT
+      Dividend_C = state["MacroTile%s"%tc]
+      Dividend_P = state["DepthU"]
+    else: # TN
+      Dividend_C = state["DepthU"]
+      Dividend_P = state["MacroTile%s"%tc]
+
+    # GRP_divisor
+    # assert(MT(DU) % (waveInC * NLC * GLVW) == 0) # TODO: UT
+    if Dividend_C % (waveInC * state["NumLoadsCoalesced%s"%tc] * state["GlobalLoadVectorWidth%s"%tc]) != 0:
+      reject(state, "MT(DU) % (waveInC * NLC * GLVW) != 0")
+
+    state["GRP_divisor%s"%tc] = Dividend_C // (waveInC * state["NumLoadsCoalesced%s"%tc] * state["GlobalLoadVectorWidth%s"%tc])
+    # assert(64 % divisor == 0)
+    if 64 % state["GRP_divisor%s"%tc] != 0:
+      reject(state, "64 % divisor != 0")
+
+    # assert(MT(DU) <= waveInC * 64 * NLC * GLVW)
+    if Dividend_C > (64 * waveInC * state["NumLoadsCoalesced%s"%tc] * state["GlobalLoadVectorWidth%s"%tc]):
+      reject(state, "MT(DU) too large for NumWaveInC to read (might read more than 1 wave in a column")
+
+    # assert(DU(MT) % (waveInP * NLP) == 0) # TODO: UT
+    if Dividend_P % (waveInP * state["NumLoadsPerpendicular%s"%tc]) != 0:
+      reject(state, "DU(MT) % (waveInP * NLP) != 0")
+
+    # assert(WaveSeparateGlobalRead == 0)
+    if state["WaveSeparateGlobalRead%s"%tc] == 1:
+      reject(state, "GlobalReadPattern can not coexist with WaveSeparateGlobalRead")
+
+    # assert(FractionalLoad == 0)
+    if state["FractionalLoad"] != 0:
+      reject(state, "GlobalReadPattern can not coexist with FractionalLoad(%u) != 0" % state["FractionalLoad"])
+
+    # assert(LocalDotLayout == 0)
+    if state["LocalDotLayout"]>1:
+      reject(state, "GlobalReadPattern can not coexist when LocalDotLayout(%u) > 1" % state["LocalDotLayout"])
+
+    # assert(GRCG == True)
+    if state["GlobalReadCoalesceGroup%s"%tc] == False:
+      reject(state, "GlobalReadPattern can not coexist with GlobalReadCoalesceGroup == False")
+
+    # assert(directToVGPR) == False)
+    if state["DirectToVgpr%s"%tc] == True:
+      reject(state, "GlobalReadPattern can not coexist with DirectToVgpr")
+
+    # assert(DirectToLds) == False)
+    if state["DirectToLds"] == True:
+      reject(state, "GlobalReadPattern can not coexist with DirectToLds")
+
+   
+
+
 
 
   ########################################
@@ -2956,6 +3083,18 @@ class Solution(collections.abc.Mapping):
         depthU = max(depthU, numOfWaves)
       if state["ProblemType"]["TLUB"] and state["WaveSeparateGlobalReadB"]:
         depthU = max(depthU, numOfWaves)
+      if state["ProblemType"]["TLUA"]:
+        if state["GlobalReadPatternA"] != []:
+          depthU = max(depthU, state["GlobalReadPatternA"][1]) # max(depthU, waveInP)
+      else:
+        if state["GlobalReadPatternA"] != []:
+          depthU = max(depthU, state["GlobalReadPatternA"][0]) # max(depthU, waveInC)
+      if state["ProblemType"]["TLUB"]:
+        if state["GlobalReadPatternB"] != []:
+          depthU = max(depthU, state["GlobalReadPatternB"][1]) # max(depthU, waveInP)
+      else:
+        if state["GlobalReadPatternB"] != []:
+          depthU = max(depthU, state["GlobalReadPatternB"][0]) # max(depthU, waveInC)
     else:
       depthU = userDepthU
       depthULds = userDepthU//state["DepthULdsDivisor"]
@@ -3186,6 +3325,13 @@ class Solution(collections.abc.Mapping):
         # not supported with PSD, has some interaction with iter
         state["StaggerU"] = 0
 
+    if state["GlobalReadPatternA"] != []:
+      Solution.assignGlobalReadPattern(state, 'A')
+    if state["GlobalReadPatternB"] != []:
+      Solution.assignGlobalReadPattern(state, 'B')
+
+
+
     if not state["FractionalLoad"]:
       if not Solution.setGlobalLoadTileDimClassic(state, "A", state["NumLoadsA"], \
           totalVectorsCoalescedA, totalElementsPerpA):
@@ -3193,6 +3339,13 @@ class Solution(collections.abc.Mapping):
       if not Solution.setGlobalLoadTileDimClassic(state, "B", state["NumLoadsB"], \
           totalVectorsCoalescedB, totalElementsPerpB):
         return
+
+    if state["GlobalReadPatternA"] != []:
+      Solution.checkGlobalReadPattern(state, 'A')
+    if state["GlobalReadPatternB"] != []:
+      Solution.checkGlobalReadPattern(state, 'B')
+
+
 
     # TODO
     if (0 and state["LSCA"] % state["GlobalLoadVectorWidthA"] != 0):
