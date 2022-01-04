@@ -2436,11 +2436,15 @@ class Solution(collections.abc.Mapping):
 
     # assert(MT(DU) <= waveInC * 64 * NLC * GLVW)
     if Dividend_C > (64 * waveInC * state["NumLoadsCoalesced%s"%tc] * state["GlobalLoadVectorWidth%s"%tc]):
-      reject(state, "MT(DU) too large for NumWaveInC to read (might read more than 1 wave in a column")
+      reject(state, "MT(DU) too large for NumWaveInC to read (might read more than 1 wave in a column)")
 
     # assert(DU(MT) % (waveInP * NLP) == 0) # TODO: UT
     if Dividend_P % (waveInP * state["NumLoadsPerpendicular%s"%tc]) != 0:
       reject(state, "DU(MT) % (waveInP * NLP) != 0")
+
+    # assert(DU(MT) <= (waveInP * 64 * NLP) == 0)
+    if Dividend_P > (64 * waveInP * state["NumLoadsPerpendicular%s"%tc]):
+      reject(state, "DU(MT) too large for NumWaveInP to read (if divisor==1 (smallest), each wave each inst occupies 64 perpendicular elements)")
 
     # assert(WaveSeparateGlobalRead == 0)
     if state["WaveSeparateGlobalRead%s"%tc] == 1:

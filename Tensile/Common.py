@@ -385,9 +385,38 @@ validParameters = {
     "WaveSeparateGlobalReadA":    [ 0, 1 ],
     "WaveSeparateGlobalReadB":    [ 0, 1 ],
 
-    # 
-    #
-    #
+    # Integrating NLCA and WSGR into 1 single parameter. Also, add more read patterns.
+    # Total 3 parameters: [waveInC (number of waves in coalesced direction), NumLoadsCoalesced, algorithm]
+    #   number of waves in coalesced direction: if there are 4 waves and total 1 load per thread, in legacy design, wave0 reads the left most part of MT, then the wave 1, ..., wave 3 read the right most part of MT. 
+    #   It looks like [w0 w1 w2 w3]. Now, if waveInC=2, wave 0 and wave 2 read the left most part, wave 1 and wave 3 read the right most part. The read pattern looks like this
+    #   [w0 w1]. 
+    #   [w2 w3]  
+    #   If waveInC=4, the read pattern looks like this [w0]. 
+    #                                                  [w1]
+    #                                                  [w2]  
+    #                                                  [w3]     
+    #   NumLoadsCoalesced: same definition with legacy NumLoadsCoalesced, just integrate it to GlobalReadPattern. For example, if there are 4 waves and 2 loads pre thread, NumLoadsCoalesced=1 looks like this
+    #   [w0_inst0 w1_inst0 w0_inst1 w1_inst1]. 
+    #   [w2_inst0 w3_inst0 w2_inst1 w3_inst1]  
+    #   NumLoadsCoalesced=2 looks like this [w0_inst0 w1_inst0]
+    #                                       [w0_inst1 w1_inst1]
+    #                                       [w2_inst0 w3_inst0]
+    #                                       [w2_inst1 w3_inst1]                                                                            
+    #   read algorithm: 0: normal, 1: wave separate, 2: wave interleave, 3: instruciton interleave
+    #   For algorithm=0, the wave and instruction follow legacy order. For example, if there are 4 waves and 2 loads pre thread, the load pattern looks exact like the above example,
+    #   [w0_inst0 w1_inst0 w0_inst1 w1_inst1]. 
+    #   [w2_inst0 w3_inst0 w2_inst1 w3_inst1]  
+    #   For algorithm=1, it is wave separate global read. For example, if there are 4 waves and 2 loads pre thread, the load pattern looks this
+    #   [w0_inst0 w0_inst1 w1_inst0 w1_inst1]. 
+    #   [w2_inst0 w2_inst1 w3_inst0 w3_inst1]  
+    #   For algorithm=2, it is wave interleave (in each column) global read. For example, if there are 4 waves, 2 loads pre thread, TLU=1, DU=8 and each wave read 2 columns for each instruciton, the load pattern looks this
+    #      col0     col1     col2     col3     col4     col5     col6     col7  
+    #   [w0_inst0 w1_inst0 w0_inst0 w1_inst0 w0_inst1 w1_inst1 w0_inst1 w1_inst1]. 
+    #   [w2_inst0 w3_inst0 w2_inst0 w3_inst0 w2_inst1 w3_inst1 w2_inst1 w3_inst1]  
+    #   For algorithm=3, it is instruction interleave (in each column) global read. For example, if there are 4 waves, 2 loads pre thread, TLU=1, DU=8 and each wave read 2 columns for each instruciton, the load pattern looks this
+    #      col0     col1     col2     col3     col4     col5     col6     col7  
+    #   [w0_inst0 w0_inst1 w0_inst0 w0_inst1 w1_inst0 w1_inst1 w1_inst0 w1_inst1]. 
+    #   [w2_inst0 w2_inst1 w2_inst0 w2_inst1 w3_inst0 w3_inst1 w3_inst0 w3_inst1]  
     "GlobalReadPatternA": validGRPinstructions,
     "GlobalReadPatternB": validGRPinstructions,
 
