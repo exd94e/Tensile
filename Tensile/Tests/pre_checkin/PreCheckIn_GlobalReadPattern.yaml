@@ -42,7 +42,7 @@ BenchmarkProblems:
   -
     - # ProblemType
       OperationType: GEMM
-      DataType: d
+      DataType: s
       # DestDataType: b
       # ComputeDataType: s
       # HighPrecisionAccumulate: True
@@ -111,7 +111,7 @@ BenchmarkProblems:
         - StorePriorityOpt: [1]
         - GroupLoadStore: [1]
         - StoreSyncOpt: [4]
-        - MIArchVgpr: [1]
+        # - MIArchVgpr: [1]
         # - AtomicAddC: [1]
         # - AssertBetaValue: [1]
         # - AssertCEqualsD: [1]
@@ -138,7 +138,7 @@ BenchmarkProblems:
   -
     - # ProblemType
       OperationType: GEMM
-      DataType: d
+      DataType: s
       # DestDataType: b
       # ComputeDataType: s
       # HighPrecisionAccumulate: True
@@ -207,7 +207,7 @@ BenchmarkProblems:
         - StorePriorityOpt: [1]
         - GroupLoadStore: [1]
         - StoreSyncOpt: [4]
-        - MIArchVgpr: [1]
+        #- MIArchVgpr: [1]
         # - AtomicAddC: [1]
         # - AssertBetaValue: [1]
         # - AssertCEqualsD: [1]
@@ -232,7 +232,7 @@ BenchmarkProblems:
   -
     - # ProblemType
       OperationType: GEMM
-      DataType: d
+      DataType: s
       # DestDataType: b
       # ComputeDataType: s
       # HighPrecisionAccumulate: True
@@ -301,7 +301,7 @@ BenchmarkProblems:
         - StorePriorityOpt: [1]
         - GroupLoadStore: [1]
         - StoreSyncOpt: [4]
-        - MIArchVgpr: [1]
+        #- MIArchVgpr: [1]
         # - AtomicAddC: [1]
         # - AssertBetaValue: [1]
         # - AssertCEqualsD: [1]
@@ -317,3 +317,4 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [ 3000, 4000, 1, 520, 3000, 3000, 3000, 4000 ]  # for function test only ==> PASS
 
+          
